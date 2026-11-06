@@ -9,7 +9,7 @@ PDXR1/M + PDXC2 エンコーダ値の取得・記録スクリプト（Kinesis + 
 
 単位:
   回転ステージでは 360° = 14,400,000 エンコーダカウント
-  → 1 カウント = 0.000025° (= 0.4363 µrad)
+  → 1 カウント = 0.000025° (= 0.09 arcsec = 0.4363 µrad)
 """
 
 import csv
@@ -42,6 +42,8 @@ SETTLE_S = 1.0              # steps: 到達後の整定待ち [s]
 
 COUNTS_PER_REV = 14_400_000
 DEG_PER_COUNT = 360.0 / COUNTS_PER_REV
+ARCSEC_PER_DEG = 3600.0
+ARCSEC_PER_COUNT = DEG_PER_COUNT * ARCSEC_PER_DEG   # = 0.09 arcsec
 
 clr.AddReference(KINESIS + r"\Thorlabs.MotionControl.DeviceManagerCLI.dll")
 clr.AddReference(KINESIS + r"\Thorlabs.MotionControl.GenericPiezoCLI.dll")
@@ -58,6 +60,11 @@ def deg_to_counts(deg: float) -> int:
 
 def counts_to_deg(counts: int) -> float:
     return counts * DEG_PER_COUNT
+
+
+def counts_to_rel_arcsec(counts: int) -> float:
+    """基準オフセット THETA0_DEG からの相対角 [arcsec]"""
+    return counts * ARCSEC_PER_COUNT - THETA0_DEG * ARCSEC_PER_DEG
 
 
 def read_counts(dev) -> int:
@@ -106,20 +113,42 @@ def setup_closed_loop(dev):
     dev.SetClosedLoopParameters(p)
 
 
-def move_to_deg(dev, target_deg, tol_counts=40, timeout_s=30.0):
-    """絶対角へ移動し、目標近傍で値が落ち着くまで待つ。tol 40カウント = 0.001°"""
-    target = deg_to_counts(target_deg + THETA0_DEG)
+def _command_move(dev, target):
     dev.SetClosedLoopTarget(target)
+    time.sleep(0.1)                       # 目標設定が反映されてから開始する
     dev.MoveStart()
-    t0, stable = time.time(), 0
+
+
+def move_to_deg(dev, target_deg, tol_counts=40, timeout_s=30.0,
+                retry_s=2.0, max_retries=3):
+    """絶対角へ移動し、目標近傍で値が落ち着くまで待つ。tol 40カウント = 0.001° = 3.6 arcsec
+
+    - すでに目標近傍なら移動指令を出さない（ゼロ距離移動で制御器が待ち状態になるのを防ぐ）
+    - 指令後 retry_s 秒たっても動き出さなければ、指令を再送する
+    """
+    target = deg_to_counts(target_deg + THETA0_DEG)
+    start = read_counts(dev)
+    if abs(start - target) <= tol_counts:
+        return True
+
+    _command_move(dev, target)
+    t0 = t_cmd = time.time()
+    stable, retries = 0, 0
     while time.time() - t0 < timeout_s:
         time.sleep(POLL_MS / 1000)
-        if abs(read_counts(dev) - target) <= tol_counts:
+        c = read_counts(dev)
+        if abs(c - target) <= tol_counts:
             stable += 1
             if stable >= 4:
                 return True
-        else:
-            stable = 0
+            continue
+        stable = 0
+        not_started = abs(c - start) <= tol_counts
+        if not_started and time.time() - t_cmd > retry_s and retries < max_retries:
+            retries += 1
+            print(f"  移動が始まらないため指令を再送します（{retries}/{max_retries}）")
+            _command_move(dev, target)
+            t_cmd = time.time()
     print(f"警告: {target_deg}° に到達しませんでした（現在 {counts_to_deg(read_counts(dev)):.5f}°）")
     return False
 
@@ -131,26 +160,29 @@ def stamp():
 def log_continuous(dev, path):
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["wallclock", "t_s", "counts", "angle_deg", "angle_rel_deg"])
+        w.writerow(["wallclock", "t_s", "counts", "angle_deg", "angle_rel_deg", "angle_rel_arcsec"])
         t0 = time.perf_counter()
         while (t := time.perf_counter() - t0) < DURATION_S:
             c = read_counts(dev)
             a = counts_to_deg(c)
-            w.writerow([stamp(), f"{t:.4f}", c, f"{a:.6f}", f"{a - THETA0_DEG:.6f}"])
+            w.writerow([stamp(), f"{t:.4f}", c, f"{a:.6f}", f"{a - THETA0_DEG:.6f}",
+                        f"{counts_to_rel_arcsec(c):.2f}"])
             time.sleep(POLL_MS / 1000)
 
 
 def log_steps(dev, path):
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["wallclock", "index", "target_deg", "sample", "counts", "angle_rel_deg", "reached"])
+        w.writerow(["wallclock", "index", "target_deg", "target_arcsec", "sample", "counts",
+                    "angle_rel_deg", "angle_rel_arcsec", "reached"])
         for i, tgt in enumerate(STEP_TARGETS_DEG):
             ok = move_to_deg(dev, tgt)
             time.sleep(SETTLE_S)
             for s in range(SAMPLES_PER_TARGET):
                 c = read_counts(dev)
-                w.writerow([stamp(), i, tgt, s, c,
-                            f"{counts_to_deg(c) - THETA0_DEG:.6f}", int(ok)])
+                w.writerow([stamp(), i, tgt, f"{tgt * ARCSEC_PER_DEG:.2f}", s, c,
+                            f"{counts_to_deg(c) - THETA0_DEG:.6f}",
+                            f"{counts_to_rel_arcsec(c):.2f}", int(ok)])
                 time.sleep(POLL_MS / 1000)
             print(f"[{i + 1}/{len(STEP_TARGETS_DEG)}] target {tgt}°")
 
