@@ -1,0 +1,2 @@
+﻿cycle,target_deg,pre_mean,pre_std,pre_pv,err_at_ref,err_final,drift,rate_per_s,post_std,post_pv,hold_s
+1,10.0,-2.115,2.4352507373669257,7.2,-1.98,-3.0015000000000005,-1.0215000000000005,-0.10893026301086424,0.31312427282655786,1.08,9.9782

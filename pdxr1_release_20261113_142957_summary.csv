@@ -1,0 +1,2 @@
+cycle,target_deg,reached,release_call,pre_mean_err_arcsec,pre_std_arcsec,jump_arcsec,drift_arcsec,total_change_arcsec,drift_rate_arcsec_per_s,post_max_abs_arcsec,post_std_arcsec,post_pp_arcsec,n_pre,n_post
+0,10.0,1,MoveStop,-2.115,2.405,-0.261,-0.626,-0.887,-0.10326,2.025,0.343,2.79,40,197

@@ -63,16 +63,38 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def print_summary(s: pd.DataFrame, df: pd.DataFrame) -> None:
-    for tgt, g in s.groupby("target_deg"):
-        print(f"\n=== 目標 {tgt:g}° ===")
-        print(" cycle   平均[arcsec]   標準偏差[arcsec]   最大−最小[arcsec]")
-        for _, r in g.iterrows():
-            print(f"  {int(r.cycle):>3}   {r['mean']:>10.2f}   {r['std']:>14.2f}   {r.pv:>15.2f}")
-        allv = df.loc[df["target_deg"] == tgt, "error_arcsec"]
-        print(f"  サイクル平均の平均     : {g['mean'].mean():.2f} arcsec")
-        print(f"  サイクル平均の標準偏差 : {g['mean'].std():.2f} arcsec（繰り返し位置決めのばらつき）")
-        print(f"  サイクル内標準偏差の平均: {g['std'].mean():.2f} arcsec（静止中のばらつき）")
-        print(f"  全サンプルの標準偏差   : {allv.std():.2f} arcsec")
+    """各サイクルの目標値からのずれ（平均・標準偏差・最大−最小）をターミナルに表示"""
+    targets = sorted(s["target_deg"].unique())
+    w = 28                                     # 1 目標あたりの列幅
+
+    print("\n各サイクルにおける目標値からのずれ [arcsec]"
+          "\n（ずれ = 実測角 − 目標角、mean: 平均, std: 標準偏差, p-v: 最大−最小）")
+    print("-" * (7 + w * len(targets)))
+    # 全角文字は端末で幅がずれるので、表の見出しは英数字にする
+    print("cycle  " + "".join(f"{f'Target {t:g} deg':^{w}}" for t in targets))
+    print("       " + "".join(f"{'mean':>8}{'std':>9}{'p-v':>11}  " for _ in targets))
+    print("-" * (7 + w * len(targets)))
+
+    for c in sorted(s["cycle"].unique()):
+        line = f"{c:>5}  "
+        for t in targets:
+            r = s[(s["target_deg"] == t) & (s["cycle"] == c)]
+            if r.empty:
+                line += f"{'-':>8}{'-':>9}{'-':>11}  "
+            else:
+                r = r.iloc[0]
+                line += f"{r['mean']:>+8.2f}{r['std']:>9.2f}{r.pv:>11.2f}  "
+        print(line)
+    print("-" * (7 + w * len(targets)))
+
+    for t in targets:
+        g = s[s["target_deg"] == t]
+        allv = df.loc[df["target_deg"] == t, "error_arcsec"]
+        print(f"\n[目標 {t:g}°]  {len(g)} サイクル")
+        print(f"  サイクル平均の平均       : {g['mean'].mean():+.2f} arcsec")
+        print(f"  サイクル平均の標準偏差   : {g['mean'].std():.2f} arcsec（繰り返し位置決めのばらつき）")
+        print(f"  サイクル内標準偏差の平均 : {g['std'].mean():.2f} arcsec（静止中のばらつき）")
+        print(f"  全サンプルの平均 / 標準偏差: {allv.mean():+.2f} / {allv.std():.2f} arcsec")
 
 
 def plot_angle(df, ax):
